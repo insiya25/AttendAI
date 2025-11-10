@@ -8,8 +8,8 @@ from .serializers import MyTokenObtainPairSerializer
 from .models import StudentProfile, TeacherProfile,Subject
 from .serializers import StudentProfileSerializer, TeacherProfileSerializer, SubjectSerializer
 from rest_framework.permissions import IsAuthenticated
-from .permissions import IsTeacher
-from .serializers import TeacherDashboardSerializer
+from .permissions import IsTeacher,IsStudent
+from .serializers import TeacherDashboardSerializer, StudentDashboardSerializer
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
@@ -80,4 +80,23 @@ class TeacherDashboardView(generics.RetrieveAPIView):
         # This is a major performance optimization.
         return TeacherProfile.objects.prefetch_related('subjects__students').get(user=self.request.user)
 
+
+class StudentDashboardView(generics.RetrieveAPIView):
+    """
+    An endpoint for the student's dashboard.
+    Returns the student's profile and their subjects, with attendance stats for each subject.
+    """
+    serializer_class = StudentDashboardSerializer
+    permission_classes = [IsAuthenticated, IsStudent]
+
+    def get_object(self):
+        # The object is the profile of the logged-in student
+        return StudentProfile.objects.prefetch_related('subjects__teachers').get(user=self.request.user)
+    
+    def get_serializer_context(self):
+        # We need to pass the student object to the serializer context
+        # so our custom methods in SubjectWithStatsSerializer can access it
+        context = super().get_serializer_context()
+        context['student'] = self.get_object()
+        return context
 

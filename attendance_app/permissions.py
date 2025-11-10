@@ -7,3 +7,11 @@ class IsTeacher(BasePermission):
     """
     def has_permission(self, request, view):
         return request.user and request.user.is_authenticated and request.user.role == 'teacher'
+
+
+class IsStudent(BasePermission):
+    """
+    Allows access only to users with the 'student' role.
+    """
+    def has_permission(self, request, view):
+        return request.user and request.user.is_authenticated and request.user.role == 'student'

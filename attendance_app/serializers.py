@@ -1,7 +1,7 @@
 # attendance_app/serializers.py
 
 from rest_framework import serializers
-from .models import User, StudentProfile, TeacherProfile, Subject
+from .models import User, StudentProfile, TeacherProfile, Subject, Attendance
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -132,3 +132,54 @@ class TeacherDashboardSerializer(serializers.ModelSerializer):
     class Meta:
         model = TeacherProfile
         fields = ['full_name', 'subjects']
+
+# A simple serializer to show teacher details
+class TeacherListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TeacherProfile
+        fields = ['full_name']
+
+# A serializer for a subject that includes attendance stats
+class SubjectWithStatsSerializer(serializers.ModelSerializer):
+    # Use our new serializer for the teacher
+    teacher = TeacherListSerializer(source='teachers.first', read_only=True)
+    
+    # Use SerializerMethodField to compute values dynamically
+    total_classes = serializers.SerializerMethodField()
+    present_count = serializers.SerializerMethodField()
+    absent_count = serializers.SerializerMethodField()
+    attendance_percentage = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Subject
+        fields = ['id', 'name', 'teacher', 'total_classes', 'present_count', 'absent_count', 'attendance_percentage']
+
+    def get_attendance_records(self, obj):
+        # This is a helper method to avoid redundant queries
+        # 'obj' is the Subject instance.
+        student = self.context['student']
+        return Attendance.objects.filter(subject=obj, student=student)
+
+    def get_total_classes(self, obj):
+        return self.get_attendance_records(obj).count()
+
+    def get_present_count(self, obj):
+        return self.get_attendance_records(obj).filter(status='present').count()
+
+    def get_absent_count(self, obj):
+        return self.get_attendance_records(obj).filter(status='absent').count()
+
+    def get_attendance_percentage(self, obj):
+        present = self.get_present_count(obj)
+        total = self.get_total_classes(obj)
+        return round((present / total) * 100, 2) if total > 0 else 0
+
+
+# The main serializer for the student's dashboard
+class StudentDashboardSerializer(serializers.ModelSerializer):
+    # We use our custom serializer for the subjects
+    subjects = SubjectWithStatsSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = StudentProfile
+        fields = ['full_name', 'roll_number', 'subjects']
