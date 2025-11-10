@@ -8,6 +8,8 @@ from .serializers import MyTokenObtainPairSerializer
 from .models import StudentProfile, TeacherProfile,Subject
 from .serializers import StudentProfileSerializer, TeacherProfileSerializer, SubjectSerializer
 from rest_framework.permissions import IsAuthenticated
+from .permissions import IsTeacher
+from .serializers import TeacherDashboardSerializer
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
@@ -62,4 +64,20 @@ class SubjectListView(generics.ListAPIView):
     queryset = Subject.objects.all()
     serializer_class = SubjectSerializer
     permission_classes = [IsAuthenticated] # Only logged-in users can see subjects
+
+
+class TeacherDashboardView(generics.RetrieveAPIView):
+    """
+    An endpoint for the teacher's dashboard.
+    Returns the teacher's profile and their subjects, with enrolled students for each subject.
+    """
+    serializer_class = TeacherDashboardSerializer
+    permission_classes = [IsAuthenticated, IsTeacher] # Protect with our custom permission
+
+    def get_object(self):
+        # The object we are retrieving is the profile of the logged-in teacher.
+        # We use prefetch_related to efficiently query the nested students.
+        # This is a major performance optimization.
+        return TeacherProfile.objects.prefetch_related('subjects__students').get(user=self.request.user)
+
 

@@ -91,8 +91,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         elif role == 'teacher':
             TeacherProfile.objects.create(user=user, full_name=full_name)
 
-        return user
-    
+        return user  
 
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
@@ -105,3 +104,31 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         # ...
 
         return token
+
+
+# A simplified serializer for listing students in the dashboard
+class StudentListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StudentProfile
+        fields = ['full_name', 'roll_number', 'photo']
+
+
+# A serializer for subjects that includes the list of enrolled students
+class SubjectWithStudentsSerializer(serializers.ModelSerializer):
+    # 'students' is the related_name we set in the StudentProfile model
+    students = StudentListSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Subject
+        fields = ['id', 'name', 'students']
+
+
+# The main serializer for the teacher's dashboard
+class TeacherDashboardSerializer(serializers.ModelSerializer):
+    # 'subjects' is the M2M field in the TeacherProfile model
+    # We use our new custom serializer to represent the subjects
+    subjects = SubjectWithStudentsSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = TeacherProfile
+        fields = ['full_name', 'subjects']
