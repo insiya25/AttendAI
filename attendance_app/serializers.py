@@ -1,8 +1,57 @@
 # attendance_app/serializers.py
 
 from rest_framework import serializers
-from .models import User, StudentProfile, TeacherProfile
+from .models import User, StudentProfile, TeacherProfile, Subject
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+
+
+class SubjectSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Subject
+        fields = ['id', 'name']
+
+class StudentProfileSerializer(serializers.ModelSerializer):
+    # We use the SubjectSerializer to show the full subject details, not just the ID
+    subjects = SubjectSerializer(many=True, read_only=True)
+    # We'll handle subject updates using a list of IDs from the frontend
+    subject_ids = serializers.ListField(
+        child=serializers.IntegerField(), write_only=True, required=False
+    )
+    username = serializers.CharField(source='user.username', read_only=True)
+
+    class Meta:
+        model = StudentProfile
+        # 'user' is excluded because it's linked automatically
+        fields = ['username', 'full_name', 'photo', 'age', 'class_name', 'roll_number', 'subjects', 'subject_ids']
+        read_only_fields = ['roll_number', 'username'] # Roll number is usually assigned, not changed
+
+    def update(self, instance, validated_data):
+        # Handle the subject_ids to update the many-to-many relationship
+        if 'subject_ids' in validated_data:
+            subject_ids = validated_data.pop('subject_ids')
+            instance.subjects.set(subject_ids)
+
+        # Standard update for other fields
+        return super().update(instance, validated_data)
+
+
+class TeacherProfileSerializer(serializers.ModelSerializer):
+    subjects = SubjectSerializer(many=True, read_only=True)
+    subject_ids = serializers.ListField(
+        child=serializers.IntegerField(), write_only=True, required=False
+    )
+    username = serializers.CharField(source='user.username', read_only=True)
+
+    class Meta:
+        model = TeacherProfile
+        fields = ['username', 'full_name', 'photo', 'age', 'subjects', 'subject_ids']
+        read_only_fields = ['username']
+
+    def update(self, instance, validated_data):
+        if 'subject_ids' in validated_data:
+            subject_ids = validated_data.pop('subject_ids')
+            instance.subjects.set(subject_ids)
+        return super().update(instance, validated_data)
 
 class RegisterSerializer(serializers.ModelSerializer):
     role = serializers.ChoiceField(choices=User.ROLE_CHOICES, write_only=True)
