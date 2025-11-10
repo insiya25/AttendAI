@@ -2,6 +2,7 @@
 
 from rest_framework import serializers
 from .models import User, StudentProfile, TeacherProfile
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 class RegisterSerializer(serializers.ModelSerializer):
     role = serializers.ChoiceField(choices=User.ROLE_CHOICES, write_only=True)
@@ -42,3 +43,16 @@ class RegisterSerializer(serializers.ModelSerializer):
             TeacherProfile.objects.create(user=user, full_name=full_name)
 
         return user
+    
+
+class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+
+        # Add custom claims
+        token['username'] = user.username
+        token['role'] = user.role
+        # ...
+
+        return token

@@ -45,8 +45,12 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     "attendance_app.apps.AttendanceAppConfig",
+    'rest_framework',
+    'rest_framework_simplejwt',
     'corsheaders',
 ]
+
+
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -138,8 +142,23 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
+# Add this configuration for Django REST Framework at the bottom of the file
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    )
+}
+
 # Whitelist your React app's origin
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173", # Default Vite dev server port
     "http://127.0.0.1:5173",
 ]
+
+# You can also configure the token lifetimes if you wish (optional)
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+}
