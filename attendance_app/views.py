@@ -5,8 +5,8 @@ from rest_framework.response import Response
 from .serializers import RegisterSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 from .serializers import MyTokenObtainPairSerializer
-from .models import StudentProfile, TeacherProfile
-from .serializers import StudentProfileSerializer, TeacherProfileSerializer
+from .models import StudentProfile, TeacherProfile,Subject
+from .serializers import StudentProfileSerializer, TeacherProfileSerializer, SubjectSerializer
 from rest_framework.permissions import IsAuthenticated
 
 class RegisterView(generics.CreateAPIView):
@@ -54,3 +54,12 @@ class ProfileView(generics.RetrieveUpdateAPIView):
     def get_serializer_context(self):
         # Pass request to the serializer context, useful for image URLs
         return {'request': self.request}
+
+class SubjectListView(generics.ListAPIView):
+    """
+    An endpoint to provide a list of all available subjects.
+    """
+    queryset = Subject.objects.all()
+    serializer_class = SubjectSerializer
+    permission_classes = [IsAuthenticated] # Only logged-in users can see subjects
+

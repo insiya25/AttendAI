@@ -1,3 +1,11 @@
-from django.contrib import admin
+# attendance_app/admin.py
 
-# Register your models here.
+from django.contrib import admin
+from .models import User, Subject, StudentProfile, TeacherProfile, Attendance
+
+# Register your models here to make them accessible in the admin panel.
+admin.site.register(User)
+admin.site.register(Subject)
+admin.site.register(StudentProfile)
+admin.site.register(TeacherProfile)
+admin.site.register(Attendance)
