@@ -34,8 +34,48 @@ class StudentProfile(models.Model):
     roll_number = models.CharField(max_length=255, unique=True)
     subjects = models.ManyToManyField(Subject, related_name='students')
 
+    email = models.EmailField(max_length=255, blank=True, null=True)
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
+
     def __str__(self):
         return self.full_name
+
+class UserSkill(models.Model):
+    student_profile = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="skills")
+    skill_name = models.CharField(max_length=100)
+    verified = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.student_profile.full_name} - {self.skill_name}"
+    
+class UserProject(models.Model):
+    SEMESTER_CHOICES = [(i, f'Semester {i}') for i in range(1, 9)]
+
+    student_profile = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="projects")
+    project_name = models.CharField(max_length=200)
+    semester = models.IntegerField(choices=SEMESTER_CHOICES)
+    description = models.TextField()
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"{self.student_profile.full_name} - {self.project_name}"
+    
+
+class Performance(models.Model):
+    SEMESTER_CHOICES = [(i, f'Semester {i}') for i in range(1, 9)]
+
+    student_profile = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="performance_records")
+    semester = models.IntegerField(choices=SEMESTER_CHOICES)
+    cgpi = models.DecimalField(max_digits=4, decimal_places=2)
+    status = models.CharField(max_length=10, choices=[('pass', 'Pass'), ('fail', 'Fail')])
+    
+    class Meta:
+        unique_together = ('student_profile', 'semester') # A student can only have one record per semester
+        ordering = ['semester']
+
+    def __str__(self):
+        return f"{self.student_profile.full_name} - Sem {self.semester}: {self.cgpi}"
 
 class Attendance(models.Model):
     STATUS_CHOICES = (

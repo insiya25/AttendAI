@@ -1,39 +1,79 @@
 # attendance_app/serializers.py
 
 from rest_framework import serializers
-from .models import User, StudentProfile, TeacherProfile, Subject, Attendance
+from .models import User, StudentProfile, TeacherProfile, Subject, Attendance, UserSkill, UserProject, Performance
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.db.models import Count, Q
 from datetime import date, timedelta
 
+
+class AllStudentsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StudentProfile
+        fields = ['user_id', 'full_name', 'roll_number']
 
 class SubjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subject
         fields = ['id', 'name']
 
+class UserSkillSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserSkill
+        fields = ['id', 'skill_name', 'verified']
+
+class UserProjectSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserProject
+        fields = ['id', 'project_name', 'semester', 'description', 'created', 'updated']
+
+class PerformanceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Performance
+        fields = ['id', 'semester', 'cgpi', 'status']
+
+class UserSkillWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserSkill
+        fields = ['skill_name'] # Student profile will be added automatically from the request user
+
+class UserProjectWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserProject
+        fields = ['project_name', 'semester', 'description']
+
+class PerformanceWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Performance
+        fields = ['semester', 'cgpi', 'status']
+
 class StudentProfileSerializer(serializers.ModelSerializer):
-    # We use the SubjectSerializer to show the full subject details, not just the ID
     subjects = SubjectSerializer(many=True, read_only=True)
-    # We'll handle subject updates using a list of IDs from the frontend
     subject_ids = serializers.ListField(
         child=serializers.IntegerField(), write_only=True, required=False
     )
     username = serializers.CharField(source='user.username', read_only=True)
+    
+    # Add the new related fields
+    skills = UserSkillSerializer(many=True, read_only=True)
+    projects = UserProjectSerializer(many=True, read_only=True)
+    performance_records = PerformanceSerializer(many=True, read_only=True)
 
     class Meta:
         model = StudentProfile
-        # 'user' is excluded because it's linked automatically
-        fields = ['username', 'full_name', 'photo', 'age', 'class_name', 'roll_number', 'subjects', 'subject_ids']
-        read_only_fields = ['roll_number', 'username'] # Roll number is usually assigned, not changed
+        # Add new fields to the list
+        fields = [
+            'username', 'full_name', 'photo', 'age', 'class_name', 
+            'roll_number', 'email', 'phone_number', 'subjects', 
+            'subject_ids', 'skills', 'projects', 'performance_records'
+        ]
+        read_only_fields = ['roll_number', 'username']
 
     def update(self, instance, validated_data):
-        # Handle the subject_ids to update the many-to-many relationship
         if 'subject_ids' in validated_data:
             subject_ids = validated_data.pop('subject_ids')
             instance.subjects.set(subject_ids)
 
-        # Standard update for other fields
         return super().update(instance, validated_data)
 
 
@@ -127,13 +167,58 @@ class SubjectWithStudentsSerializer(serializers.ModelSerializer):
 
 # The main serializer for the teacher's dashboard
 class TeacherDashboardSerializer(serializers.ModelSerializer):
-    # 'subjects' is the M2M field in the TeacherProfile model
-    # We use our new custom serializer to represent the subjects
-    subjects = SubjectWithStudentsSerializer(many=True, read_only=True)
+    subjects = serializers.SerializerMethodField()
 
     class Meta:
         model = TeacherProfile
         fields = ['full_name', 'subjects']
+
+    def get_subjects(self, obj):
+        # 'obj' is the TeacherProfile instance
+        teacher_subjects = obj.subjects.prefetch_related('students').all()
+        result = []
+
+        for subject in teacher_subjects:
+            attendance_records = Attendance.objects.filter(subject=subject)
+            total_records = attendance_records.count()
+            present_records = attendance_records.filter(status='present').count()
+
+            # --- Monthly Trend Data for Bar Chart ---
+            today = date.today()
+            start_of_month = today.replace(day=1)
+            days_in_month = (today.replace(month=today.month % 12 + 1, day=1) - timedelta(days=1)).day if today.month != 12 else 31
+            
+            monthly_trend_data = attendance_records.filter(
+                date__gte=start_of_month
+            ).values('date').annotate(
+                presents=Count('id', filter=Q(status='present')),
+                absents=Count('id', filter=Q(status='absent'))
+            ).order_by('date')
+            
+            # Map data for easy lookup
+            trend_map = {item['date'].strftime('%d'): {'presents': item['presents'], 'absents': item['absents']} for item in monthly_trend_data}
+            
+            # Format for the frontend chart
+            monthly_trend = []
+            for day_num in range(1, days_in_month + 1):
+                day_str = f"{day_num:02d}"
+                monthly_trend.append({
+                    'day': day_str,
+                    'presents': trend_map.get(day_str, {}).get('presents', 0),
+                    'absents': trend_map.get(day_str, {}).get('absents', 0),
+                })
+            # --- End Monthly Trend ---
+
+            result.append({
+                'id': subject.id,
+                'name': subject.name,
+                'total_students': subject.students.count(),
+                'present_percentage': round((present_records / total_records) * 100, 1) if total_records > 0 else 0,
+                'absent_percentage': round(((total_records - present_records) / total_records) * 100, 1) if total_records > 0 else 0,
+                'students': StudentListSerializer(subject.students.all(), many=True).data, # For the students tab
+                'monthly_trend': monthly_trend,
+            })
+        return result
 
 # A simple serializer to show teacher details
 class TeacherListSerializer(serializers.ModelSerializer):
