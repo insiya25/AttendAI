@@ -12,9 +12,13 @@ from .permissions import IsTeacher,IsStudent
 from .serializers import TeacherDashboardSerializer, StudentDashboardSerializer, ApprovalReadSerializer, ApprovalWriteSerializer, TeacherSelectSerializer, AIEnhanceSerializer
 from rest_framework.views import APIView
 from .serializers import UserSkillWriteSerializer, UserProjectWriteSerializer, PerformanceWriteSerializer
-from .models import UserSkill, UserProject, Performance,Approval
+from .models import UserSkill, UserProject, Performance,Approval, Attendance
 from .services import gemini_service
 from django.db import models
+
+import calendar
+from datetime import datetime
+from django.db import transaction
 
 
 
@@ -353,3 +357,100 @@ class TeacherApprovalUpdateView(generics.UpdateAPIView):
             instance.save()
             return Response(ApprovalReadSerializer(instance).data)
         return Response({'error': 'Invalid status'}, status=400)
+
+
+class GetAttendanceSheetView(APIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+
+    def get(self, request):
+        subject_id = request.query_params.get('subject_id')
+        month = int(request.query_params.get('month')) # 1-12
+        year = int(request.query_params.get('year'))
+
+        if not all([subject_id, month, year]):
+            return Response({'error': 'Subject, Month, and Year are required.'}, status=400)
+
+        try:
+            subject = Subject.objects.get(id=subject_id)
+            # Security check: Ensure teacher teaches this subject
+            if subject not in request.user.teacherprofile.subjects.all():
+                return Response({'error': 'You do not teach this subject.'}, status=403)
+
+            # Get all enrolled students
+            students = subject.students.all().order_by('roll_number')
+            
+            # Get existing attendance records for this month
+            attendance_records = Attendance.objects.filter(
+                subject=subject,
+                date__year=year,
+                date__month=month
+            )
+
+            # Create a lookup dictionary: {student_id: {day: status}}
+            attendance_map = {}
+            for record in attendance_records:
+                sid = record.student.user_id
+                if sid not in attendance_map:
+                    attendance_map[sid] = {}
+                attendance_map[sid][record.date.day] = record.status
+
+            # Build response data
+            student_data = []
+            for student in students:
+                student_data.append({
+                    'id': student.user_id,
+                    'full_name': student.full_name,
+                    'roll_number': student.roll_number,
+                    'attendance': attendance_map.get(student.user_id, {})
+                })
+
+            # Get number of days in the month
+            num_days = calendar.monthrange(year, month)[1]
+
+            return Response({
+                'students': student_data,
+                'days_in_month': num_days
+            })
+
+        except Subject.DoesNotExist:
+            return Response({'error': 'Subject not found'}, status=404)
+
+class BulkAttendanceUpdateView(APIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+
+    def post(self, request):
+        subject_id = request.data.get('subject_id')
+        updates = request.data.get('updates') # List of {student_id, date (YYYY-MM-DD), status}
+
+        if not subject_id or not updates:
+            return Response({'error': 'Missing data.'}, status=400)
+
+        try:
+            subject = Subject.objects.get(id=subject_id)
+            teacher = request.user.teacherprofile # The logged-in teacher
+
+            with transaction.atomic():
+                for update in updates:
+                    student = StudentProfile.objects.get(user_id=update['student_id'])
+                    date_str = update['date']
+                    status = update['status']
+
+                    # Update or Create the record
+                    Attendance.objects.update_or_create(
+                        student=student,
+                        subject=subject,
+                        date=date_str,
+                        defaults={
+                            'status': status,
+                            'teacher': teacher # Associate the teacher marking it
+                        }
+                    )
+            
+            return Response({'message': 'Attendance updated successfully.'})
+
+        except Exception as e:
+            print(f"Error updating attendance: {e}")
+            return Response({'error': 'Failed to update attendance.'}, status=500)
+
+
+
