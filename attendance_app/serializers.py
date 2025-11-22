@@ -1,7 +1,7 @@
 # attendance_app/serializers.py
 
 from rest_framework import serializers
-from .models import User, StudentProfile, TeacherProfile, Subject, Attendance, UserSkill, UserProject, Performance
+from .models import User, StudentProfile, TeacherProfile, Subject, Attendance, UserSkill, UserProject, Performance, Approval
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.db.models import Count, Q
 from datetime import date, timedelta
@@ -317,3 +317,31 @@ class StudentDashboardSerializer(serializers.ModelSerializer):
             })
             
         return chart_data
+
+
+class TeacherSelectSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TeacherProfile
+        fields = ['user_id', 'full_name'] # Assuming user_id is the PK for TeacherProfile based on OneToOne
+
+class ApprovalReadSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.full_name', read_only=True)
+    teacher_name = serializers.CharField(source='teacher.full_name', read_only=True)
+    cc_names = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Approval
+        fields = '__all__'
+
+    def get_cc_names(self, obj):
+        return [t.full_name for t in obj.cc_teachers.all()]
+
+class ApprovalWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Approval
+        fields = ['teacher', 'cc_teachers', 'subject', 'message']
+
+class AIEnhanceSerializer(serializers.Serializer):
+    text = serializers.CharField()
+    type = serializers.ChoiceField(choices=['subject', 'message'])
+

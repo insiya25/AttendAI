@@ -92,3 +92,24 @@ class Attendance(models.Model):
     class Meta:
         # A student can only have one attendance record per subject per day
         unique_together = ('student', 'subject', 'date')
+
+
+class Approval(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    )
+
+    student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name='approval_requests')
+    teacher = models.ForeignKey(TeacherProfile, on_delete=models.CASCADE, related_name='approvals_received') # Primary recipient
+    cc_teachers = models.ManyToManyField(TeacherProfile, related_name='approvals_cced', blank=True)
+    subject = models.CharField(max_length=255)
+    message = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.subject} - {self.student.full_name}"
+

@@ -6,7 +6,7 @@ from .views import (
     ProjectCreateView, ProjectUpdateView, ProjectDeleteView,
     PerformanceCreateView, PerformanceUpdateView, PerformanceDeleteView
 )
-from .views import AssessmentStartView, AssessmentSubmitView
+from .views import AssessmentStartView, AssessmentSubmitView, TeacherApprovalListView, TeacherListView,AIEnhanceView, StudentApprovalView, TeacherApprovalUpdateView
 
 urlpatterns = [
     path('register/', RegisterView.as_view(), name='register'),
@@ -34,4 +34,13 @@ urlpatterns = [
 
     path('assessment/start/', AssessmentStartView.as_view(), name='assessment-start'),
     path('assessment/submit/', AssessmentSubmitView.as_view(), name='assessment-submit'),
+
+
+    path('teachers/list/', TeacherListView.as_view()),
+    path('ai/enhance/', AIEnhanceView.as_view()),
+    
+    path('student/approvals/', StudentApprovalView.as_view()),
+    
+    path('teacher/approvals/', TeacherApprovalListView.as_view()),
+    path('teacher/approvals/<int:pk>/update/', TeacherApprovalUpdateView.as_view()),
 ]

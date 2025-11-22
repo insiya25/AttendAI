@@ -9,11 +9,12 @@ from .models import StudentProfile, TeacherProfile,Subject
 from .serializers import StudentProfileSerializer, TeacherProfileSerializer, SubjectSerializer
 from rest_framework.permissions import IsAuthenticated
 from .permissions import IsTeacher,IsStudent
-from .serializers import TeacherDashboardSerializer, StudentDashboardSerializer
+from .serializers import TeacherDashboardSerializer, StudentDashboardSerializer, ApprovalReadSerializer, ApprovalWriteSerializer, TeacherSelectSerializer, AIEnhanceSerializer
 from rest_framework.views import APIView
 from .serializers import UserSkillWriteSerializer, UserProjectWriteSerializer, PerformanceWriteSerializer
-from .models import UserSkill, UserProject, Performance
+from .models import UserSkill, UserProject, Performance,Approval
 from .services import gemini_service
+from django.db import models
 
 
 
@@ -288,3 +289,67 @@ class StudentDashboardView(generics.RetrieveAPIView):
         context['student'] = self.get_object()
         return context
 
+
+# --- Helper to get list of teachers for dropdown ---
+class TeacherListView(generics.ListAPIView):
+    queryset = TeacherProfile.objects.all()
+    serializer_class = TeacherSelectSerializer
+    permission_classes = [IsAuthenticated]
+
+# --- AI Enhancement Endpoint ---
+class AIEnhanceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = AIEnhanceSerializer(data=request.data)
+        if serializer.is_valid():
+            text = serializer.validated_data['text']
+            type = serializer.validated_data['type']
+            
+            task = 'ENHANCE_SUBJECT' if type == 'subject' else 'ENHANCE_MESSAGE'
+            result = gemini_service.call_gemini_api(task, {'text': text})
+            
+            return Response(result)
+        return Response(serializer.errors, status=400)
+
+# --- Student: List & Create Approvals ---
+class StudentApprovalView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated, IsStudent]
+    
+    def get_queryset(self):
+        return Approval.objects.filter(student=self.request.user.studentprofile).order_by('-created_at')
+    
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return ApprovalWriteSerializer
+        return ApprovalReadSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(student=self.request.user.studentprofile)
+
+# --- Teacher: List & Update Approvals ---
+class TeacherApprovalListView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+    serializer_class = ApprovalReadSerializer
+
+    def get_queryset(self):
+        # Show approvals where teacher is main recipient OR in CC
+        return Approval.objects.filter(
+            models.Q(teacher=self.request.user.teacherprofile) | 
+            models.Q(cc_teachers=self.request.user.teacherprofile)
+        ).distinct().order_by('-created_at')
+
+class TeacherApprovalUpdateView(generics.UpdateAPIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+    serializer_class = ApprovalReadSerializer
+    queryset = Approval.objects.all()
+    
+    def update(self, request, *args, **kwargs):
+        # Custom update to only allow status change
+        instance = self.get_object()
+        status_val = request.data.get('status')
+        if status_val in ['approved', 'rejected']:
+            instance.status = status_val
+            instance.save()
+            return Response(ApprovalReadSerializer(instance).data)
+        return Response({'error': 'Invalid status'}, status=400)

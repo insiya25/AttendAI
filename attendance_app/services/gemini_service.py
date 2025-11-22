@@ -59,9 +59,43 @@ GEMINI_PROMPT_CONFIG = {
                 "overall_review": "You have a solid foundational understanding of {skill_name}! Your answers show a good grasp of the core concepts. To take your skills to the next level, I recommend focusing on practical application by building a small project that utilizes these concepts, and perhaps explore advanced topics like design patterns."
             }}
         """
+    },
+    'ENHANCE_SUBJECT': {
+        'prompt': """
+            You are a professional communication assistant. Rewrite the following email/request subject line to be formal, concise, and clear.
+            Input Subject: "{text}"
+            
+            IMPORTANT: Return ONLY the enhanced subject text. Do not add quotes or extra words.
+        """
+    },
+    'ENHANCE_MESSAGE': {
+        'prompt': """
+            You are a professional communication assistant. Rewrite the following request message to be polite, formal, professional, and persuasive.
+            Input Message: "{text}"
+            
+            IMPORTANT: Return ONLY the enhanced message text. Do not add quotes.
+        """
     }
 }
 
+# REVISED PROMPTS FOR JSON COMPATIBILITY:
+GEMINI_PROMPT_CONFIG.update({
+    'ENHANCE_SUBJECT': {
+        'prompt': """
+            Rewrite the following subject line to be formal and concise.
+            Input: "{text}"
+            Response format: JSON with key "enhanced_text".
+            Example: {{"enhanced_text": "Request for Leave Due to Illness"}}
+        """
+    },
+    'ENHANCE_MESSAGE': {
+        'prompt': """
+            Rewrite the following message to be professional and polite.
+            Input: "{text}"
+            Response format: JSON with key "enhanced_text".
+        """
+    }
+})
 
 
 def call_gemini_api(task_name: str, context: dict) -> dict:
