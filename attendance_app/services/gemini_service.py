@@ -3,8 +3,15 @@ import google.generativeai as genai
 from django.conf import settings
 import json
 
+import traceback # Added for detailed error logs
+
 # Configure the Gemini client with the API key from settings
-genai.configure(api_key=settings.GEMINI_API_KEY)
+# Configure API Key
+if not settings.GEMINI_API_KEY:
+    print("CRITICAL WARNING: GEMINI_API_KEY is missing in settings.")
+else:
+    genai.configure(api_key=settings.GEMINI_API_KEY)
+
 
 # A centralized dictionary for all our AI prompts and configurations
 GEMINI_PROMPT_CONFIG = {
@@ -75,6 +82,46 @@ GEMINI_PROMPT_CONFIG = {
             
             IMPORTANT: Return ONLY the enhanced message text. Do not add quotes.
         """
+    },
+
+    'ANALYZE_ATTENDANCE_SHEET': {
+        'prompt': """
+            You are an AI Data Entry Clerk specialized in handwriting recognition.
+            Analyze this attendance sheet image.
+            
+            STRUCTURE:
+            - It is a grid.
+            - Rows represent Students. Look for the "Roll No." column. 
+            - The Roll Numbers follow the format "25MCA-XX" (e.g., 25MCA-31, 25MCA-49).
+            - Columns represent Dates (written vertically at the top, e.g., 30/9, 10/10).
+            
+            TASK:
+            For each student row found:
+            1. Extract the exact Roll Number (e.g., "25MCA-31").
+            2. Extract the Student Name.
+            3. For each date column, determine status:
+               - Signature/Initial/Scribble -> "present"
+               - "A", "AB", "Absent", or Blank -> "absent"
+            
+            OUTPUT FORMAT:
+            Return a pure JSON object.
+            {{
+                "records": [
+                    {{
+                        "roll_number": "25MCA-31",
+                        "name": "Khan Mohammad Adnan",
+                        "attendance": [
+                            {{ "date": "30-09-2025", "status": "present" }},
+                            {{ "date": "10-10-2025", "status": "absent" }}
+                        ]
+                    }}
+                ]
+            }}
+            
+            IMPORTANT:
+            - If the date header only says "30/9", append the current year "2025" to make it "30-09-2025".
+            - Ensure date format is strictly DD-MM-YYYY.
+        """
     }
 }
 
@@ -98,34 +145,78 @@ GEMINI_PROMPT_CONFIG.update({
 })
 
 
-def call_gemini_api(task_name: str, context: dict) -> dict:
-    """
-    A centralized function to call the Gemini API.
-    Args:
-        task_name: The key from GEMINI_PROMPT_CONFIG (e.g., 'GENERATE_QUESTIONS').
-        context: A dictionary with data to format the prompt (e.g., {'skill_name': 'Python'}).
-    Returns:
-        A dictionary parsed from Gemini's JSON response.
-    """
+# def call_gemini_api(task_name: str, context: dict) -> dict:
+#     """
+#     A centralized function to call the Gemini API.
+#     Args:
+#         task_name: The key from GEMINI_PROMPT_CONFIG (e.g., 'GENERATE_QUESTIONS').
+#         context: A dictionary with data to format the prompt (e.g., {'skill_name': 'Python'}).
+#     Returns:
+#         A dictionary parsed from Gemini's JSON response.
+#     """
+#     if task_name not in GEMINI_PROMPT_CONFIG:
+#         raise ValueError("Invalid task name provided for Gemini service.")
+
+#     # Get the prompt template and format it with the provided context
+#     prompt_template = GEMINI_PROMPT_CONFIG[task_name]['prompt']
+#     prompt = prompt_template.format(**context)
+
+#     try:
+#         model = genai.GenerativeModel('models/gemini-2.5-pro') # Using the latest powerful model
+#         response = model.generate_content(prompt)
+        
+#         # Clean the response to ensure it's valid JSON
+#         cleaned_response = response.text.strip().replace('```json', '').replace('```', '').strip()
+        
+#         return json.loads(cleaned_response)
+
+#     except json.JSONDecodeError:
+#         print("Error: Gemini response was not valid JSON.")
+#         return {"error": "Failed to parse AI response."}
+#     except Exception as e:
+#         print(f"An unexpected error occurred with Gemini API: {e}")
+#         return {"error": f"An API error occurred: {e}"}
+    
+
+def call_gemini_api(task_name: str, context: dict, image=None) -> dict:
     if task_name not in GEMINI_PROMPT_CONFIG:
-        raise ValueError("Invalid task name provided for Gemini service.")
+        return {"error": "Invalid task name."}
 
-    # Get the prompt template and format it with the provided context
-    prompt_template = GEMINI_PROMPT_CONFIG[task_name]['prompt']
-    prompt = prompt_template.format(**context)
-
+    # 1. Safe String Formatting
     try:
-        model = genai.GenerativeModel('models/gemini-2.5-pro') # Using the latest powerful model
-        response = model.generate_content(prompt)
-        
-        # Clean the response to ensure it's valid JSON
-        cleaned_response = response.text.strip().replace('```json', '').replace('```', '').strip()
-        
-        return json.loads(cleaned_response)
+        prompt_template = GEMINI_PROMPT_CONFIG[task_name]['prompt']
+        prompt_text = prompt_template.format(**context)
+    except KeyError as e:
+        print(f"❌ Prompt Formatting Error: {e}")
+        return {"error": f"Prompt formatting failed. Missing key: {e}"}
 
-    except json.JSONDecodeError:
-        print("Error: Gemini response was not valid JSON.")
-        return {"error": "Failed to parse AI response."}
+    # 2. Call Gemini
+    try:
+        # We use 'gemini-1.5-flash' for speed and stability. 
+        # You can switch back to 'gemini-1.5-pro' later if needed.
+        model = genai.GenerativeModel('models/gemini-2.5-pro') 
+        
+        print(f"🤖 Calling Gemini Model ({task_name})...")
+        
+        if image:
+            response = model.generate_content([prompt_text, image])
+        else:
+            response = model.generate_content(prompt_text)
+            
+        print("✅ Gemini Response Received.")
+        
+        # 3. Parse JSON
+        cleaned_response = response.text.strip()
+        # Remove code blocks if present
+        if cleaned_response.startswith("```"):
+            cleaned_response = cleaned_response.split("```")[1]
+            if cleaned_response.startswith("json"):
+                cleaned_response = cleaned_response[4:]
+        
+        return json.loads(cleaned_response.strip())
+
     except Exception as e:
-        print(f"An unexpected error occurred with Gemini API: {e}")
-        return {"error": f"An API error occurred: {e}"}
+        # Print full traceback to console so we can debug
+        print("❌ Gemini API Error Details:")
+        traceback.print_exc()
+        return {"error": str(e)}

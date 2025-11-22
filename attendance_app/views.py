@@ -20,6 +20,11 @@ import calendar
 from datetime import datetime
 from django.db import transaction
 
+import PIL.Image
+from .services import gemini_service
+
+from django.core.exceptions import ObjectDoesNotExist
+
 
 
 class AssessmentStartView(APIView):
@@ -420,37 +425,96 @@ class BulkAttendanceUpdateView(APIView):
 
     def post(self, request):
         subject_id = request.data.get('subject_id')
-        updates = request.data.get('updates') # List of {student_id, date (YYYY-MM-DD), status}
-
-        if not subject_id or not updates:
-            return Response({'error': 'Missing data.'}, status=400)
-
+        is_ocr = request.data.get('is_ocr', False)
+        
         try:
             subject = Subject.objects.get(id=subject_id)
-            teacher = request.user.teacherprofile # The logged-in teacher
+            teacher = request.user.teacherprofile
 
             with transaction.atomic():
-                for update in updates:
-                    student = StudentProfile.objects.get(user_id=update['student_id'])
-                    date_str = update['date']
-                    status = update['status']
+                if is_ocr:
+                    ocr_data = request.data.get('ocr_data')
+                    for student_rec in ocr_data:
+                        raw_roll = student_rec.get('roll_number', '').strip()
+                        
+                        # Fix logic: Try to find student by roll number (Case Insensitive)
+                        student = None
+                        try:
+                            # Try exact match first
+                            student = StudentProfile.objects.get(roll_number__iexact=raw_roll)
+                        except ObjectDoesNotExist:
+                            # Fallback: Try removing spaces (e.g., "25MCA - 31" -> "25MCA-31")
+                            normalized_roll = raw_roll.replace(" ", "").upper()
+                            try:
+                                student = StudentProfile.objects.get(roll_number__iexact=normalized_roll)
+                            except ObjectDoesNotExist:
+                                print(f"⚠️ Teacher Warning: Could not find student with Roll No: {raw_roll}")
+                                continue # Skip this record if student doesn't exist
 
-                    # Update or Create the record
-                    Attendance.objects.update_or_create(
-                        student=student,
-                        subject=subject,
-                        date=date_str,
-                        defaults={
-                            'status': status,
-                            'teacher': teacher # Associate the teacher marking it
-                        }
-                    )
+                        # Now iterate through dates
+                        for att in student_rec.get('attendance', []):
+                            try:
+                                # Handle formats like "30/09/2025" or "30-09-2025"
+                                date_str = att['date'].replace('/', '-')
+                                # Convert to YYYY-MM-DD
+                                date_obj = datetime.strptime(date_str, '%d-%m-%Y').date()
+                                
+                                Attendance.objects.update_or_create(
+                                    student=student,
+                                    subject=subject,
+                                    date=date_obj,
+                                    defaults={'status': att['status'], 'teacher': teacher}
+                                )
+                            except ValueError as ve:
+                                print(f"Skipping invalid date format: {att['date']}")
+                                continue
+
+                else:
+                    # ... (Keep existing manual update logic unchanged) ...
+                    updates = request.data.get('updates')
+                    for update in updates:
+                        student = StudentProfile.objects.get(user_id=update['student_id'])
+                        Attendance.objects.update_or_create(
+                            student=student,
+                            subject=subject,
+                            date=update['date'],
+                            defaults={'status': update['status'], 'teacher': teacher}
+                        )
             
             return Response({'message': 'Attendance updated successfully.'})
 
         except Exception as e:
-            print(f"Error updating attendance: {e}")
-            return Response({'error': 'Failed to update attendance.'}, status=500)
+            print(f"Error in Bulk Update: {e}")
+            return Response({'error': str(e)}, status=500)
 
+
+
+class ProcessAttendanceSheetView(APIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+
+    def post(self, request):
+        if 'image' not in request.FILES:
+            return Response({'error': 'No image provided'}, status=400)
+
+        uploaded_file = request.FILES['image']
+        
+        try:
+            # Convert uploaded file to PIL Image for Gemini
+            img = PIL.Image.open(uploaded_file)
+            
+            # Call AI Service
+            result = gemini_service.call_gemini_api(
+                'ANALYZE_ATTENDANCE_SHEET', 
+                context={}, # Context is empty as prompt handles it all
+                image=img
+            )
+            
+            if "error" in result:
+                return Response(result, status=500)
+
+            return Response(result)
+
+        except Exception as e:
+            return Response({'error': f'Processing failed: {str(e)}'}, status=500)
 
 
