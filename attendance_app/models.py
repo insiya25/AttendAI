@@ -22,6 +22,8 @@ class TeacherProfile(models.Model):
     age = models.IntegerField(null=True, blank=True)
     subjects = models.ManyToManyField(Subject, related_name='teachers')
 
+    email = models.EmailField(max_length=255, blank=True, null=True)
+
     def __str__(self):
         return self.full_name
 

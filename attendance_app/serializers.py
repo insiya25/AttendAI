@@ -78,7 +78,8 @@ class StudentProfileSerializer(serializers.ModelSerializer):
 
 
 class TeacherProfileSerializer(serializers.ModelSerializer):
-    subjects = SubjectSerializer(many=True, read_only=True)
+    # Custom field to get subjects with student counts for the chart
+    subjects_data = serializers.SerializerMethodField()
     subject_ids = serializers.ListField(
         child=serializers.IntegerField(), write_only=True, required=False
     )
@@ -86,14 +87,27 @@ class TeacherProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TeacherProfile
-        fields = ['username', 'full_name', 'photo', 'age', 'subjects', 'subject_ids']
+        # Added 'email' and 'subjects_data'
+        fields = ['username', 'full_name', 'photo', 'age', 'email', 'subjects_data', 'subject_ids']
         read_only_fields = ['username']
+
+    def get_subjects_data(self, obj):
+        # Returns subject name and number of students enrolled
+        data = []
+        for subject in obj.subjects.all():
+            data.append({
+                'id': subject.id,
+                'name': subject.name,
+                'student_count': subject.students.count()
+            })
+        return data
 
     def update(self, instance, validated_data):
         if 'subject_ids' in validated_data:
             subject_ids = validated_data.pop('subject_ids')
             instance.subjects.set(subject_ids)
         return super().update(instance, validated_data)
+    
 
 class RegisterSerializer(serializers.ModelSerializer):
     role = serializers.ChoiceField(choices=User.ROLE_CHOICES, write_only=True)
