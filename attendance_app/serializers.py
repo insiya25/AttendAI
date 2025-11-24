@@ -197,6 +197,43 @@ class TeacherDashboardSerializer(serializers.ModelSerializer):
             total_records = attendance_records.count()
             present_records = attendance_records.filter(status='present').count()
 
+            # --- NEW: Calculate Distribution ---
+            students = subject.students.all()
+            distribution = {
+                "90-100%": 0,
+                "75-89%": 0,
+                "50-74%": 0,
+                "< 50%": 0
+            }
+
+            for student in students:
+                # Get individual student stats
+                s_records = attendance_records.filter(student=student)
+                s_total = s_records.count()
+                if s_total > 0:
+                    s_present = s_records.filter(status='present').count()
+                    percentage = (s_present / s_total) * 100
+                else:
+                    percentage = 0 # Or 100 depending on policy, assuming 0 for no data
+
+                if percentage >= 90:
+                    distribution["90-100%"] += 1
+                elif percentage >= 75:
+                    distribution["75-89%"] += 1
+                elif percentage >= 50:
+                    distribution["50-74%"] += 1
+                else:
+                    distribution["< 50%"] += 1
+
+            # Format for Recharts
+            distribution_data = [
+                {"range": "90-100%", "count": distribution["90-100%"], "status": "Top"},
+                {"range": "75-89%", "count": distribution["75-89%"], "status": "Good"},
+                {"range": "50-74%", "count": distribution["50-74%"], "status": "Avg"},
+                {"range": "< 50%", "count": distribution["< 50%"], "status": "Crit"},
+            ]
+            # -----------------------------------
+
             # --- Monthly Trend Data for Bar Chart ---
             today = date.today()
             start_of_month = today.replace(day=1)
@@ -231,6 +268,7 @@ class TeacherDashboardSerializer(serializers.ModelSerializer):
                 'absent_percentage': round(((total_records - present_records) / total_records) * 100, 1) if total_records > 0 else 0,
                 'students': StudentListSerializer(subject.students.all(), many=True).data, # For the students tab
                 'monthly_trend': monthly_trend,
+                'attendance_distribution': distribution_data, 
             })
         return result
 
