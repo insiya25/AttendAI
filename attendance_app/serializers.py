@@ -268,7 +268,7 @@ class TeacherDashboardSerializer(serializers.ModelSerializer):
                 'absent_percentage': round(((total_records - present_records) / total_records) * 100, 1) if total_records > 0 else 0,
                 'students': StudentListSerializer(subject.students.all(), many=True).data, # For the students tab
                 'monthly_trend': monthly_trend,
-                'attendance_distribution': distribution_data, 
+                'attendance_distribution': distribution_data, m
             })
         return result
 

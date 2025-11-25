@@ -115,3 +115,12 @@ class Approval(models.Model):
     def __str__(self):
         return f"{self.subject} - {self.student.full_name}"
 
+class StudentFace(models.Model):
+    student = models.OneToOneField(StudentProfile, on_delete=models.CASCADE, related_name='face_data')
+    # We store the 128-dimension encoding as a JSON text string
+    face_encoding = models.TextField() 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Face Data: {self.student.full_name}"

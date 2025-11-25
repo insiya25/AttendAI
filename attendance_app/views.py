@@ -12,7 +12,7 @@ from .permissions import IsTeacher,IsStudent
 from .serializers import TeacherDashboardSerializer, StudentDashboardSerializer, ApprovalReadSerializer, ApprovalWriteSerializer, TeacherSelectSerializer, AIEnhanceSerializer
 from rest_framework.views import APIView
 from .serializers import UserSkillWriteSerializer, UserProjectWriteSerializer, PerformanceWriteSerializer
-from .models import UserSkill, UserProject, Performance,Approval, Attendance
+from .models import UserSkill, UserProject, Performance,Approval, Attendance, StudentFace
 from .services import gemini_service
 from django.db import models
 
@@ -24,6 +24,13 @@ import PIL.Image
 from .services import gemini_service
 
 from django.core.exceptions import ObjectDoesNotExist
+
+import numpy as np
+import json
+import cv2
+from PIL import Image
+from deepface import DeepFace
+from django.core.files.uploadedfile import InMemoryUploadedFile
 
 
 
@@ -546,4 +553,154 @@ class ProcessAttendanceSheetView(APIView):
         except Exception as e:
             return Response({'error': f'Processing failed: {str(e)}'}, status=500)
 
+
+# --- HELPER: Convert Django File to Numpy Array for DeepFace ---
+def convert_image_to_numpy(uploaded_file):
+    # Open image using Pillow
+    img = Image.open(uploaded_file)
+    # Convert to RGB (DeepFace expects RGB)
+    img = img.convert('RGB')
+    # Convert to numpy array
+    return np.array(img)
+
+# --- HELPER: Calculate Cosine Similarity ---
+def find_cosine_distance(source_representation, test_representation):
+    a = np.matmul(np.transpose(source_representation), test_representation)
+    b = np.sum(np.multiply(source_representation, source_representation))
+    c = np.sum(np.multiply(test_representation, test_representation))
+    return 1 - (a / (np.sqrt(b) * np.sqrt(c)))
+
+# --- 1. REGISTER FACE VIEW ---
+class RegisterFaceView(APIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+
+    def post(self, request):
+        student_id = request.data.get('student_id')
+        image_file = request.FILES.get('image')
+
+        if not student_id or not image_file:
+            return Response({'error': 'Student ID and Image are required.'}, status=400)
+
+        try:
+            student = StudentProfile.objects.get(user_id=student_id)
+            
+            # Convert image to numpy array
+            img_array = convert_image_to_numpy(image_file)
+
+            # Generate Embedding (Using "Facenet" model for balance of speed/accuracy)
+            # enforce_detection=True ensures we actually have a face
+            embedding_objs = DeepFace.represent(
+                img_path=img_array, 
+                model_name="Facenet", 
+                enforce_detection=True
+            )
+
+            if not embedding_objs:
+                return Response({'error': 'No face detected.'}, status=400)
+
+            # Get the embedding vector
+            embedding = embedding_objs[0]["embedding"]
+            
+            # Save as JSON
+            encoding_json = json.dumps(embedding)
+
+            StudentFace.objects.update_or_create(
+                student=student,
+                defaults={'face_encoding': encoding_json}
+            )
+
+            return Response({'message': f'Face registered for {student.full_name}'})
+
+        except ValueError as e:
+            return Response({'error': 'No face detected in the image. Please try again.'}, status=400)
+        except StudentProfile.DoesNotExist:
+            return Response({'error': 'Student not found.'}, status=404)
+        except Exception as e:
+            print(f"Register Error: {e}")
+            return Response({'error': str(e)}, status=500)
+
+
+# --- 2. RECOGNIZE FACE VIEW ---
+class RecognizeFaceView(APIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+
+    def post(self, request):
+        subject_id = request.data.get('subject_id')
+        image_file = request.FILES.get('image')
+
+        if not subject_id or not image_file:
+            return Response({'error': 'Subject and Image are required.'}, status=400)
+
+        try:
+            # 1. Process Uploaded Image
+            img_array = convert_image_to_numpy(image_file)
+            
+            # Get embedding of the uploaded face
+            target_embedding_objs = DeepFace.represent(
+                img_path=img_array, 
+                model_name="Facenet", 
+                enforce_detection=True
+            )
+            
+            if not target_embedding_objs:
+                return Response({'status': 'no_face', 'message': 'No face detected'})
+
+            target_embedding = target_embedding_objs[0]["embedding"]
+
+            # 2. Fetch ALL known faces
+            known_faces = StudentFace.objects.all().select_related('student')
+            
+            best_match = None
+            lowest_distance = 1.0 # Start high
+            threshold = 0.40 # Facenet threshold (lower is stricter)
+
+            for face_obj in known_faces:
+                db_embedding = json.loads(face_obj.face_encoding)
+                
+                # Calculate Distance
+                distance = find_cosine_distance(target_embedding, db_embedding)
+                
+                if distance < lowest_distance:
+                    lowest_distance = distance
+                    best_match = face_obj.student
+
+            # 3. Check Threshold
+            if best_match and lowest_distance < threshold:
+                # --- NEW: Check Enrollment ---
+                subject = Subject.objects.get(id=subject_id)
+                
+                # Check if student is enrolled in this subject
+                if not best_match.subjects.filter(id=subject.id).exists():
+                    return Response({
+                        'status': 'warning', # New status type
+                        'student_name': best_match.full_name,
+                        'message': f'Not enrolled in {subject.name}'
+                    })
+                # -----------------------------
+
+                teacher = request.user.teacherprofile
+                today = datetime.now().date()
+
+                Attendance.objects.update_or_create(
+                    student=best_match,
+                    subject=subject,
+                    date=today,
+                    defaults={'status': 'present', 'teacher': teacher}
+                )
+
+                return Response({
+                    'status': 'success',
+                    'student_name': best_match.full_name,
+                    'roll_number': best_match.roll_number,
+                    'message': 'Marked Present',
+                    'confidence': round((1 - lowest_distance) * 100, 2)
+                })
+            else:
+                return Response({'status': 'unknown', 'message': 'Face not recognized'})
+
+        except ValueError:
+            return Response({'status': 'no_face', 'message': 'No face detected'})
+        except Exception as e:
+            print(f"Recognition Error: {e}")
+            return Response({'error': str(e)}, status=500)
 
